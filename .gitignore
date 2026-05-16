@@ -1,2 +1,6 @@
 node_modules/
 DevOps_MultiCloud_Project_Guide.docx
+terraform/azure/.terraform/
+terraform/azure/.terraform.lock.hcl
+terraform/azure/terraform.tfstate
+terraform/azure/terraform.tfstate.backup    
