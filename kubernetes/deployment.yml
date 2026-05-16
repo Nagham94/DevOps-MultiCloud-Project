@@ -1,0 +1,113 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  # name of the deployment, namespace and labels inside the cluster
+  name: portfolio-deployment
+  namespace: portfolio
+  labels:
+    app: portfolio
+spec:
+  # number of replicas to be created
+  # 2 copies of the application will be created and running at all times
+  replicas: 2
+  selector:
+    matchLabels:
+      app: portfolio
+  strategy:
+    # strategy type and parameters for rolling update
+    # when deploying a new version of the application, one replica will be updated at a time, ensuring that at least one replica is always available to serve traffic
+    type: RollingUpdate
+    rollingUpdate:
+      # maximum number of replicas that can be unavailable during the update process
+      # one to ensure that at least one replica is always available to serve traffic
+      maxUnavailable: 1
+      # maximum number of replicas that can be created above the desired number of replicas during the update process
+      maxSurge: 1
+  template:
+    metadata:
+      # labels for the pods created by this deployment
+      labels:
+        app: portfolio
+    spec:
+      securityContext:
+        # run the container as a non-root user with a specific user ID
+        runAsNonRoot: true
+        # specify the user ID to run the container as
+        runAsUser: 1000
+        # specify the group ID to run the container as
+        fsGroup: 1000
+      containers:
+        - name: portfolio
+          # container image to be used for the application
+          image: nagham94/website:v1
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 3000
+              protocol: TCP
+          resources:
+            # resource requests and limits for the container
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "200m"
+              memory: "256Mi"
+          livenessProbe:
+            # configuration for the liveness probe to check if the application is running
+            httpGet:
+              path: /health
+              port: 3000
+            # parameters for the liveness probe
+            # wait time before the first probe is initiated after the container starts
+            initialDelaySeconds: 15
+            # interval between each probe
+            periodSeconds: 10
+            # if no response is received within this time, the probe is considered failed
+            timeoutSeconds: 5
+            # number of consecutive failures before the container is considered unhealthy and kubernetes kill the pod and create a new one
+            failureThreshold: 3
+          readinessProbe:
+            # configuration for the readiness probe to check if the application is ready to serve traffic
+            httpGet:
+              path: /health
+              port: 3000
+            # parameters for the readiness probe
+            # wait time before the first probe is initiated after the container starts
+            initialDelaySeconds: 5
+            # interval between each probe
+            periodSeconds: 10
+            # if no response is received within this time, the probe is considered failed
+            timeoutSeconds: 5
+            # number of consecutive failures before the container is considered not ready and removed from the service endpoints
+            failureThreshold: 3
+          startupProbe:
+            # configuration for the startup probe to check if the application has started successfully
+            # runs before the liveness and readiness probes, and is used to determine if the application has started successfully
+            httpGet:
+              path: /health
+              port: 3000
+            # parameters for the startup probe
+            # wait time before the first probe is initiated after the container starts
+            # to prevent kubernetes from killing the container before it has had a chance to start up, especially if the application takes a long time to start
+            initialDelaySeconds: 15
+            periodSeconds: 5
+            failureThreshold: 10
+          securityContext:
+            # container level security context to enhance the security of the application
+            # prevent the container from running with escalated privileges
+            # block the container from gaining additional privileges, such as running as root or accessing sensitive system resources
+            allowPrivilegeEscalation: false
+            # false as nodejs need to write temporary files to the filesystem and it is running as a non-root user, so it needs write permissions to the filesystem
+            readOnlyRootFilesystem: false
+            runAsNonRoot: true
+            runAsUser: 1000
+            capabilities:
+              # drop all capabilities to minimize the attack surface of the container
+              # nodejs does not require any additional capabilities to run, so dropping all capabilities helps to reduce the potential attack surface of the container and enhance the security of the applications
+              drop:
+                - ALL
+      # policy for restarting the container if it fails
+      restartPolicy: Always
+      # when a pod is deleted, it will be given this amount of time to gracefully shut down and finish any remaining tasks before it is forcefully terminated
+      # it sends a SIGTERM signal to the container, allowing it to perform any necessary cleanup operations before shutting down
+      terminationGracePeriodSeconds: 30

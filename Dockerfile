@@ -14,16 +14,16 @@ RUN npm ci --only=production
 # base image, alpine it is a small image
 FROM node:22-alpine AS production
 # create a non root user to run the application for security
-RUN addgroup -S nodejs && adduser -S nodejs -G nodejs
+#RUN addgroup -g 1000 -S nodejs && adduser -S nodejs -u 1000-G nodejs
 # working directory in the container
 WORKDIR /app
 # copy only the necessary files from the build stage to the production stage
 COPY --from=build /app/node_modules ./node_modules
 # copy the rest of the application files to the working directory
 # set the ownership to the non root user to be able to read and execute the files
-COPY --chown=nodejs:nodejs website/ ./
+COPY --chown=node:node website/ ./
 # switch to the non root user
-USER nodejs
+USER node
 # expose the port that the application will run on
 EXPOSE 3000
 # command to run the application

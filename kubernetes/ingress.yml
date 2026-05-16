@@ -1,0 +1,30 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  # name of the ingress, namespace and labels inside the cluster
+  name: portfolio-ingress
+  namespace: portfolio
+  annotations:
+    # annotation to specify the ingress class to be used for this ingress
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    # to autimatically redirect HTTP traffic to HTTPS, ensuring secure communication between clients and the application
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    # maximum allowed size of the client request body, set to 10 megabytes
+    # to protect the application from large requests that could potentially cause performance issues or crashes
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+spec:
+  ingressClassName: nginx
+  rules:
+    # only requests from this domain will be routed to the service
+    - host: portfolio.example.com
+      http:
+        paths:
+          # path to route the traffic to the service
+          - path: /
+            pathType: Prefix
+            backend:
+              # send matching traffic to the portfolio-service on port 80
+              service:
+                name: portfolio-service
+                port:
+                  number: 80

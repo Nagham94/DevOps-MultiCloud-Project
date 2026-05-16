@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: Service
+metadata:
+  # name of the service, namespace and labels inside the cluster
+  name: portfolio-service
+  namespace: portfolio
+  labels:
+    app: portfolio
+spec:
+  # type of the service and selector to match the pods created by the deployment
+  type: ClusterIP
+  selector:
+    app: portfolio
+  ports:
+    - name: http
+      # port number to expose the service on
+      port: 80
+      # port number to target on the pods selected by the selector
+      targetPort: 3000
+      # protocol to use for the service
+      protocol: TCP

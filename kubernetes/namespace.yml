@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  # name of the namespace and labels inside the cluster
+  name: portfolio
+  labels:
+    name: portfolio
