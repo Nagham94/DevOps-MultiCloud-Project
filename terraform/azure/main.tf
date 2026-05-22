@@ -16,3 +16,15 @@ module "security" {
   private_subnet_id   = module.networking.private_subnet_id
   bastion_subnet_id   = module.networking.bastion_subnet_id
 }
+
+module "compute" {
+  source              = "./modules/compute"
+  resource_group_name = module.networking.resource_group_name
+  location            = var.location
+  tags                = var.tags
+  environment         = var.environment
+  private_subnet_id   = module.networking.private_subnet_id
+  nsg_id              = module.security.nsg_id
+  admin_username      = var.admin_username
+  vm_size             = var.vm_size
+}

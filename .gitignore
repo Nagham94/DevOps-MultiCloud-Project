@@ -3,4 +3,8 @@ DevOps_MultiCloud_Project_Guide.docx
 terraform/azure/.terraform/
 terraform/azure/.terraform.lock.hcl
 terraform/azure/terraform.tfstate
-terraform/azure/terraform.tfstate.backup    
+terraform/azure/terraform.tfstate.backup 
+terraform/aws/.terraform/
+terraform/aws/.terraform.lock.hcl
+terraform/aws/terraform.tfstate
+terraform/aws/terraform.tfstate.backup    

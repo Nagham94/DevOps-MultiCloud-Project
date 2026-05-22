@@ -25,3 +25,15 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+variable "admin_username" {
+  description = "Admin username for the VM"
+  type        = string
+  default     = "azureuser"
+}
+
+variable "vm_size" {
+  description = "The size of the VM"
+  type        = string
+  default     = "Standard_B2s"
+}

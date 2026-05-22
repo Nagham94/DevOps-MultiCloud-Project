@@ -12,3 +12,14 @@ output "private_subnet_id" {
   description = "The ID of the private subnet"
   value       = module.networking.private_subnet_id
 }
+
+output "vm_private_ip" {
+  description = "The private IP address of the VM"
+  value       = module.compute.vm_private_ip
+}
+
+output "ssh_private_key" {
+  description = "The private SSH key for the VM"
+  value       = module.compute.ssh_private_key
+  sensitive   = true
+}
