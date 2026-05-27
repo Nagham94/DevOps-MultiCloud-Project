@@ -1,0 +1,30 @@
+variable "environment" {
+  description = "The environment for which the infrastructure is being provisioned"
+  type        = string
+}
+
+variable "tags" {
+  description = "A map of tags to apply to all resources"
+  type        = map(string)
+}
+
+variable "vpc_id" {
+  description = "The ID of the VPC to deploy EC2 instances in"
+  type        = string
+}
+
+variable "instance_type" {
+  description = "The EC2 instance type to use for the Jenkins/App server"
+  type        = string
+  default     = "t3.micro"
+}
+
+variable "private_subnet_ids" {
+  description = "A list of private subnet IDs to launch EC2 instances in"
+  type        = list(string)
+}
+
+variable "security_group_id" {
+  description = "The ID of the security group to attach to the EC2 instance"
+  type        = string
+}
