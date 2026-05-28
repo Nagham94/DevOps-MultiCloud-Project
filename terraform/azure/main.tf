@@ -31,4 +31,6 @@ module "compute" {
   nsg_id              = module.security.nsg_id
   admin_username      = var.admin_username
   vm_size             = var.vm_size
+  aks_subnet_id       = module.networking.aks_subnet_id
+  acr_id              = module.security.acr_id
 }

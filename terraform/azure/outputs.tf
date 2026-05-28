@@ -33,3 +33,8 @@ output "bastion_host" {
   description = "The DNS name of the Azure Bastion host"
   value       = module.security.bastion_host
 }
+
+output "aks_cluster_name" {
+  description = "The name of the AKS cluster"
+  value       = module.compute.aks_cluster_name
+}

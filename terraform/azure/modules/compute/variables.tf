@@ -37,3 +37,13 @@ variable "vm_size" {
   description = "The size of the VM"
   type        = string
 }
+
+variable "aks_subnet_id" {
+  description = "The ID of the subnet to which the AKS cluster will be connected"
+  type        = string
+}
+
+variable "acr_id" {
+  description = "The ID of the Azure Container Registry to allow AKS to pull images from"
+  type        = string
+}
