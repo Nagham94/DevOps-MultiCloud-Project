@@ -1,7 +1,7 @@
 output "resource_group_name" {
   description = "The name of the resource group where the virtual network is created"
   value       = azurerm_resource_group.main_rg.name
-  }
+}
 
 output "vnet_id" {
   description = "The ID of the virtual network"
@@ -21,4 +21,14 @@ output "aks_subnet_id" {
 output "bastion_subnet_id" {
   description = "The ID of the Bastion subnet"
   value       = azurerm_subnet.bastion_subnet.id
+}
+
+output "bastion_subnet_prefix" {
+  description = "The CIDR block used by the Bastion subnet"
+  value       = azurerm_subnet.bastion_subnet.address_prefixes[0]
+}
+
+output "endpoints_subnet_id" {
+  description = "The ID of the endpoints subnet"
+  value       = azurerm_subnet.endpoints.id
 }

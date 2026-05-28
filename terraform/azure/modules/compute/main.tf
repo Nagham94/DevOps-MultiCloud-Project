@@ -1,3 +1,10 @@
+# SSH key
+resource "tls_private_key" "key" {
+  algorithm = "RSA"
+  rsa_bits  = 4096
+}
+
+# nic for jenkins VM: no public ips
 resource "azurerm_network_interface" "nic-jenkins" {
   name                = "nic-jenkins-${var.environment}"
   location            = var.location
@@ -16,11 +23,7 @@ resource "azurerm_network_interface_security_group_association" "nic_nsg_associa
   network_security_group_id = var.nsg_id
 }
 
-resource "tls_private_key" "key" {
-  algorithm = "RSA"
-  rsa_bits  = 4096
-}
-
+# jenkins VM in private subnet
 resource "azurerm_linux_virtual_machine" "jenkins" {
   name                  = "vm-jenkins-${var.environment}"
   location              = var.location
@@ -50,16 +53,3 @@ resource "azurerm_linux_virtual_machine" "jenkins" {
 
   disable_password_authentication = true
 }
-/*
-resource "azurerm_storage_account" "main" {
-  name                     = "st${var.environment}nagham"
-  resource_group_name      = var.resource_group_name
-  location                 = var.location
-  account_tier             = "Standard"
-  account_replication_type = "GRS"  # Geo-redundant for DR
-  tags                     = var.tags
-
-  # Disable public blob access
-  allow_nested_items_to_be_public = false
-}
-*/

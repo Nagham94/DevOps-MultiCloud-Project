@@ -23,3 +23,13 @@ output "ssh_private_key" {
   value       = module.compute.ssh_private_key
   sensitive   = true
 }
+
+output "acr_login_server" {
+  description = "The login server of the Azure Container Registry"
+  value       = module.security.acr_login_server
+}
+
+output "bastion_host" {
+  description = "The DNS name of the Azure Bastion host"
+  value       = module.security.bastion_host
+}

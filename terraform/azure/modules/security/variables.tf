@@ -27,3 +27,23 @@ variable "bastion_subnet_id" {
   description = "The ID of the bastion subnet to associate with the NSG"
   type        = string
 }
+
+variable "bastion_subnet_prefix" {
+  description = "The CIDR block for the bastion subnet, used when restricting Bastion inbound traffic"
+  type        = string
+}
+
+variable "aks_subnet_id" {
+  description = "The ID of the AKS subnet to associate with the NSG"
+  type        = string
+}
+
+variable "vnet_id" {
+  description = "The ID of the virtual network where the NSG is located"
+  type        = string
+}
+
+variable "endpoints_subnet_id" {
+  description = "The ID of the subnet where private endpoints will be deployed"
+  type        = string
+}
