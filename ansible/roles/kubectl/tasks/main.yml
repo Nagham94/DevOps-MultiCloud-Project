@@ -1,0 +1,70 @@
+- name: Get latest kubectl version
+  uri:
+    url: https://dl.k8s.io/release/stable.txt
+    return_content: yes
+  register: kubectl_version
+
+- name: Download kubectl
+  get_url:
+    url: "https://dl.k8s.io/release/{{ kubectl_version.content | trim }}/bin/linux/amd64/kubectl"
+    dest: /tmp/kubectl
+    mode: "0755"
+
+- name: Install kubectl
+  copy:
+    src: /tmp/kubectl
+    dest: /usr/local/bin/kubectl
+    mode: "0755"
+    remote_src: yes
+  become: yes
+
+- name: Verify kubectl
+  command: kubectl version --client
+  register: kubectl_ver
+  changed_when: false
+
+- name: Print kubectl version
+  debug:
+    msg: "{{ kubectl_ver.stdout }}"
+
+- name: Install Helm
+  shell: |
+    curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+  args:
+    creates: /usr/local/bin/helm
+  become: yes
+
+- name: Verify Helm
+  command: helm version
+  register: helm_ver
+  changed_when: false
+
+- name: Install Azure CLI
+  shell: |
+    curl -sL https://aka.ms/InstallAzureCLIDeb | bash
+  args:
+    creates: /usr/bin/az
+  become: yes
+
+- name: Verify Azure CLI
+  command: az --version
+  register: az_ver
+  changed_when: false
+
+- name: Create .kube directory for jenkins user
+  file:
+    path: /var/lib/jenkins/.kube
+    state: directory
+    owner: jenkins
+    group: jenkins
+    mode: "0700"
+  become: yes
+
+- name: Create .kube directory for azureuser
+  file:
+    path: /home/azureuser/.kube
+    state: directory
+    owner: azureuser
+    group: azureuser
+    mode: "0700"
+  become: yes

@@ -1,0 +1,78 @@
+- name: Install Java 17
+  apt:
+    name: openjdk-17-jdk
+    state: present
+    update_cache: yes
+  become: yes
+
+- name: Verify Java version
+  command: java -version
+  register: java_version
+  changed_when: false
+
+- name: Add Jenkins GPG key
+  apt_key:
+    url: https://pkg.jenkins.io/debian-stable/jenkins.io-2023.key
+    state: present
+  become: yes
+
+- name: Add Jenkins repository
+  apt_repository:
+    repo: deb https://pkg.jenkins.io/debian-stable binary/
+    state: present
+  become: yes
+
+- name: Install Jenkins
+  apt:
+    name: jenkins
+    state: present
+    update_cache: yes
+  become: yes
+
+- name: Enable and start Jenkins
+  systemd:
+    name: jenkins
+    enabled: yes
+    state: started
+  become: yes
+
+- name: Wait for Jenkins to start
+  wait_for:
+    port: 8080
+    delay: 15
+    timeout: 120
+  # Waits until port 8080 is open before continuing
+
+- name: Get Jenkins initial admin password
+  command: cat /var/lib/jenkins/secrets/initialAdminPassword
+  register: jenkins_password
+  become: yes
+  changed_when: false
+
+- name: Print Jenkins initial password
+  debug:
+    msg: "Jenkins initial password: {{ jenkins_password.stdout }}"
+  # This prints the password in the Ansible output
+  # to use it when you first open Jenkins
+
+- name: Add jenkins user to docker group
+  user:
+    name: jenkins
+    groups: docker
+    append: yes
+  become: yes
+
+- name: Restart Jenkins so docker group takes effect
+  systemd:
+    name: jenkins
+    state: restarted
+  become: yes
+
+- name: Create Jenkins workspace directory
+  file:
+    path: /var/lib/jenkins/workspace
+    state: directory
+    owner: jenkins
+    group: jenkins
+    mode: "0755"
+  become: yes

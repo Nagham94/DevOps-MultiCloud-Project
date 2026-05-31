@@ -173,7 +173,11 @@ resource "azurerm_bastion_host" "bastion_host" {
   name                = "bastion-${var.environment}"
   location            = var.location
   resource_group_name = var.resource_group_name
+  sku                 = "Standard"
   tags                = var.tags
+
+  tunneling_enabled   = true      
+  ip_connect_enabled  = true         
 
   ip_configuration {
     name                 = "configuration"

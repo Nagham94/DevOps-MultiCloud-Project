@@ -1,0 +1,75 @@
+- name: Remove old Docker versions if any
+  apt:
+    name:
+      - docker
+      - docker-engine
+      - docker.io
+      - containerd
+      - runc
+    # to remove these packages if they are present
+    state: absent
+  become: yes
+
+# official Docker installation steps for Ubuntu from Docker documentation
+# gpg key to verify packages and repository to get latest Docker versions
+- name: Add Docker GPG key
+  apt_key:
+    url: https://download.docker.com/linux/ubuntu/gpg
+    state: present
+  become: yes
+
+# ansible_distribution_release is a fact that contains the codename of the Ubuntu release 
+# used to construct the correct repository URL for the current Ubuntu version
+# reusable role for any Ubuntu version by using this variable instead of hardcoding the release name
+- name: Add Docker repository
+  apt_repository:
+    repo: >
+      deb [arch=amd64]
+      https://download.docker.com/linux/ubuntu
+      {{ ansible_distribution_release }} stable
+    state: present
+  become: yes
+
+- name: Install Docker CE
+  apt:
+    name:
+      - docker-ce
+      - docker-ce-cli
+      - containerd.io
+      - docker-buildx-plugin
+      - docker-compose-plugin
+    state: present
+    update_cache: yes
+  become: yes
+
+- name: Enable and start Docker
+  systemd:
+    name: docker
+    enabled: yes
+    state: started
+  become: yes
+
+- name: Add azureuser to docker group
+  user:
+    name: azureuser
+    groups: docker
+    append: yes
+  become: yes
+
+- name: Add jenkins user to docker group
+  user:
+    name: jenkins
+    groups: docker
+    append: yes
+  become: yes
+  # This runs after Jenkins is installed
+  # If Jenkins user does not exist yet, this fails gracefully
+
+- name: Verify Docker is working
+  command: docker --version
+  register: docker_version
+  changed_when: false
+
+- name: Print Docker version
+  debug:
+    msg: "{{ docker_version.stdout }}"

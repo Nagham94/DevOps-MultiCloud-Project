@@ -151,4 +151,14 @@ resource "azurerm_role_assignment" "aks_acr_pull" {
   depends_on           = [azurerm_kubernetes_cluster.main]
 }
 
+resource "local_file" "ssh_private_key" {
+  content         = tls_private_key.key.private_key_pem
+  filename        = pathexpand("~/.ssh/jenkins_vm.pem")
+  file_permission = "0400"
+
+  depends_on = [azurerm_linux_virtual_machine.jenkins]
+}
+
+
+
 

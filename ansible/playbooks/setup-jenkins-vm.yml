@@ -1,0 +1,48 @@
+---
+- name: Configure Jenkins VM — full setup
+  hosts: jenkins
+  gather_facts: yes
+  become: yes
+
+  pre_tasks:
+    - name: Verify we can connect
+      ping:
+
+    - name: Print OS information
+      debug:
+        msg: >
+          Configuring {{ inventory_hostname }}
+          running {{ ansible_distribution }}
+          {{ ansible_distribution_version }}
+
+  roles:
+    - role: common      # System updates, firewall, basic tools
+    - role: docker      # Docker CE installation
+    - role: jenkins     # Jenkins + Java installation
+    - role: kubectl     # kubectl, Helm, Azure CLI
+
+  post_tasks:
+    - name: Verify all services are running
+      systemd:
+        name: "{{ item }}"
+      register: service_status
+      loop:
+        - jenkins
+        - docker
+      changed_when: false
+
+    - name: Print final status
+      debug:
+        msg: |
+          ✓ VM configuration complete
+          ✓ Jenkins running on port 8080
+          ✓ Docker installed
+          ✓ kubectl installed
+          ✓ Helm installed
+          ✓ Azure CLI installed
+
+  handlers:
+    - name: restart sshd
+      systemd:
+        name: sshd
+        state: restarted
