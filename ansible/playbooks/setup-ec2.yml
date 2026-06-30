@@ -36,6 +36,9 @@
     - role: kubectl_aws
       tags: kubectl
 
+    - role: monitoring
+      tags: monitoring
+
   post_tasks:
     - name: Verify Docker is running
       systemd:
@@ -53,6 +56,9 @@
             Helm:    installed
             AWS CLI: installed
             EKS:      connected
+            Jenkins:  running on port 8080
+            Ingress:    nginx ingress controller running
+            Monitoring: Prometheus + Grafana running
       tags: always
 
   handlers:

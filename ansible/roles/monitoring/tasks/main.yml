@@ -1,0 +1,117 @@
+---
+# Prometheus + Grafana via kube-prometheus-stack
+# Installing in monitoring namespace
+
+- name: Add prometheus-community Helm repository
+  shell: |
+    helm repo add prometheus-community \
+      https://prometheus-community.github.io/helm-charts
+  become_user: ubuntu
+  environment:
+    HOME: /home/ubuntu
+    KUBECONFIG: /home/ubuntu/.kube/config
+  changed_when: false
+
+- name: Update Helm repositories
+  shell: helm repo update
+  become_user: ubuntu
+  environment:
+    HOME: /home/ubuntu
+    KUBECONFIG: /home/ubuntu/.kube/config
+  changed_when: false
+
+- name: Check if kube-prometheus-stack already installed
+  shell: |
+    helm list \
+      --namespace monitoring \
+      --short \
+      | grep -c kube-prometheus-stack || true
+  become_user: ubuntu
+  environment:
+    HOME: /home/ubuntu
+    KUBECONFIG: /home/ubuntu/.kube/config
+  register: prometheus_check
+  changed_when: false
+  failed_when: false
+
+- name: Install kube-prometheus-stack
+  shell: |
+    helm install kube-prometheus-stack \
+      prometheus-community/kube-prometheus-stack \
+      --namespace monitoring \
+      --create-namespace \
+      --set-string grafana.adminPassword="{{ grafana_password }}" \
+      --set-string prometheus.prometheusSpec.retention="{{ prometheus_retention }}" \
+      --set grafana.service.type=ClusterIP \
+      --set prometheus.service.type=ClusterIP \
+      --set alertmanager.service.type=ClusterIP \
+      --wait \
+      --timeout 10m
+  become_user: ubuntu
+  environment:
+    HOME: /home/ubuntu
+    KUBECONFIG: /home/ubuntu/.kube/config
+  when: prometheus_check.stdout == "0" or prometheus_check.stdout == ""
+
+- name: Skip if already installed
+  debug:
+    msg: "kube-prometheus-stack already installed — skipping"
+  when: prometheus_check.stdout != "0" and prometheus_check.stdout != ""
+
+- name: Wait for Prometheus pods to be ready
+  shell: |
+    kubectl wait \
+      --namespace monitoring \
+      --for=condition=ready pod \
+      --selector=app.kubernetes.io/name=prometheus \
+      --timeout=180s
+  become_user: ubuntu
+  environment:
+    HOME: /home/ubuntu
+    KUBECONFIG: /home/ubuntu/.kube/config
+  register: prometheus_wait
+  failed_when: false
+
+- name: Wait for Grafana pod to be ready
+  shell: |
+    kubectl wait \
+      --namespace monitoring \
+      --for=condition=ready pod \
+      --selector=app.kubernetes.io/name=grafana \
+      --timeout=180s
+  become_user: ubuntu
+  environment:
+    HOME: /home/ubuntu
+    KUBECONFIG: /home/ubuntu/.kube/config
+
+- name: Verify all monitoring pods are running
+  shell: kubectl get pods -n monitoring
+  become_user: ubuntu
+  environment:
+    HOME: /home/ubuntu
+    KUBECONFIG: /home/ubuntu/.kube/config
+  register: monitoring_pods
+  changed_when: false
+
+- name: Print monitoring pods
+  debug:
+    msg: "{{ monitoring_pods.stdout_lines }}"
+
+- name: Verify monitoring services
+  shell: kubectl get service -n monitoring
+  become_user: ubuntu
+  environment:
+    HOME: /home/ubuntu
+    KUBECONFIG: /home/ubuntu/.kube/config
+  register: monitoring_services
+  changed_when: false
+
+- name: Print monitoring services
+  debug:
+    msg: "{{ monitoring_services.stdout_lines }}"
+
+- name: Print access instructions
+  debug:
+    msg: |
+       Monitoring stack installed successfully         
+      
