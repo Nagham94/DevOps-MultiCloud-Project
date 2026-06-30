@@ -84,7 +84,7 @@ pipeline {
               --label git-commit=${GIT_COMMIT} \
               -t ${ECR_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG} \
               -t ${ECR_REGISTRY}/${IMAGE_NAME}:latest \
-              -f ../Dockerfile .
+              .
 
             echo "Built images:"
             docker images | grep ${IMAGE_NAME}
