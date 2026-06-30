@@ -132,3 +132,109 @@
     msg: |
       Jenkins user can reach EKS successfully
       Nodes: {{ eks_nodes_jenkins.stdout_lines | length }} node(s) found
+
+# Installing in ingress-nginx namespace
+# keeps ingress controller separate from application workloads
+# makes it reusable across multiple namespaces and applications
+
+- name: Add ingress-nginx Helm repository
+  shell: |
+    helm repo add ingress-nginx \
+      https://kubernetes.github.io/ingress-nginx
+  become_user: ubuntu
+  environment:
+    HOME: /home/ubuntu
+    KUBECONFIG: /home/ubuntu/.kube/config
+  changed_when: false
+
+- name: Update Helm repositories
+  shell: helm repo update
+  become_user: ubuntu
+  environment:
+    HOME: /home/ubuntu
+    KUBECONFIG: /home/ubuntu/.kube/config
+  changed_when: false
+
+- name: Check if ingress-nginx is already installed
+  shell: |
+    helm list \
+      --namespace ingress-nginx \
+      --filter ingress-nginx \
+      --short
+  become_user: ubuntu
+  environment:
+    HOME: /home/ubuntu
+    KUBECONFIG: /home/ubuntu/.kube/config
+  register: ingress_check
+  failed_when: false
+  changed_when: false
+
+- name: Install NGINX Ingress Controller
+  shell: |
+    helm install ingress-nginx ingress-nginx/ingress-nginx \
+      --namespace ingress-nginx \
+      --create-namespace \
+      --set controller.replicaCount=2 \
+      --set controller.service.type=LoadBalancer \
+      --set controller.service.externalTrafficPolicy=Local \
+      --wait \
+      --timeout 5m
+  become_user: ubuntu
+  environment:
+    HOME: /home/ubuntu
+    KUBECONFIG: /home/ubuntu/.kube/config
+  when: ingress_check.stdout == ""
+
+- name: Skip ingress installation if already exists
+  debug:
+    msg: "ingress-nginx already installed — skipping"
+  when: ingress_check.stdout != ""
+
+- name: Wait for ingress controller pods to be ready
+  shell: |
+    kubectl wait \
+      --namespace ingress-nginx \
+      --for=condition=ready pod \
+      --selector=app.kubernetes.io/component=controller \
+      --timeout=180s
+  become_user: ubuntu
+  environment:
+    HOME: /home/ubuntu
+    KUBECONFIG: /home/ubuntu/.kube/config
+
+- name: Verify ingress controller is running
+  shell: kubectl get pods -n ingress-nginx
+  become_user: ubuntu
+  environment:
+    HOME: /home/ubuntu
+    KUBECONFIG: /home/ubuntu/.kube/config
+  register: ingress_pods
+  changed_when: false
+
+- name: Print ingress controller pods
+  debug:
+    msg: "{{ ingress_pods.stdout_lines }}"
+
+- name: Wait for AWS Load Balancer to be provisioned
+  shell: |
+    kubectl get service ingress-nginx-controller \
+      -n ingress-nginx \
+      -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
+  become_user: ubuntu
+  environment:
+    HOME: /home/ubuntu
+    KUBECONFIG: /home/ubuntu/.kube/config
+  register: alb_dns
+  # Retry up to 20 times with 30 second delay
+  # AWS Load Balancer takes 2-5 minutes to provision
+  retries: 20
+  delay: 30
+  until: alb_dns.stdout != ""
+  changed_when: false
+
+- name: Print ALB DNS
+  debug:
+    msg: |
+       ALB DNS (save for Traffic Manager):                 
+       {{ alb_dns.stdout }}
+     
