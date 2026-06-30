@@ -1,0 +1,297 @@
+pipeline {
+  agent any
+
+  environment {
+    // ECR configuration
+    ECR_ACCOUNT_ID  = "254652353999"
+    ECR_REGION      = "eu-north-1"
+    ECR_REGISTRY    = "${ECR_ACCOUNT_ID}.dkr.ecr.${ECR_REGION}.amazonaws.com"
+    IMAGE_NAME      = "portfolio-website"
+    IMAGE_TAG       = "${BUILD_NUMBER}"
+
+    // EKS configuration
+    EKS_CLUSTER     = "eks-prod-dr"
+    K8S_NAMESPACE   = "portfolio"
+
+    // AWS credentials from Jenkins credential store
+    AWS_ACCESS_KEY_ID     = credentials('aws-access-key-id')
+    AWS_SECRET_ACCESS_KEY = credentials('aws-secret-access-key')
+    AWS_DEFAULT_REGION    = "${ECR_REGION}"
+  }
+
+  options {
+    // Keep only last 10 builds to save disk space
+    buildDiscarder(logRotator(numToKeepStr: '10'))
+    // Fail if pipeline runs longer than 30 minutes
+    timeout(time: 30, unit: 'MINUTES')
+    // Never run two builds of same branch simultaneously
+    disableConcurrentBuilds()
+    // Add timestamps to every console line
+    timestamps()
+  }
+
+  triggers {
+    // Trigger on every GitHub push
+    githubPush()
+  }
+
+  stages {
+
+    stage('Checkout') {
+      steps {
+        echo "Checking out code from GitHub"
+        echo "Branch:  ${env.GIT_BRANCH}"
+        echo "Commit:  ${env.GIT_COMMIT}"
+        checkout scm
+      }
+    }
+
+    stage('Install Dependencies') {
+      steps {
+        echo "Installing Node.js dependencies"
+        dir('website') {
+          sh '''
+            echo "Node: $(node --version)"
+            echo "NPM:  $(npm --version)"
+            npm ci
+          '''
+        }
+      }
+    }
+
+    stage('Run Tests') {
+      steps {
+        echo "Running tests"
+        dir('website') {
+          sh 'npm test'
+        }
+      }
+      post {
+        failure {
+          echo "Tests failed — pipeline stopped. No broken code deployed."
+        }
+      }
+    }
+
+    stage('Build Docker Image') {
+      steps {
+        echo "Building Docker image"
+        echo "Image: ${ECR_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}"
+        dir('website') {
+          sh """
+            docker build \
+              --no-cache \
+              --label build-number=${IMAGE_TAG} \
+              --label git-commit=${GIT_COMMIT} \
+              -t ${ECR_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG} \
+              -t ${ECR_REGISTRY}/${IMAGE_NAME}:latest \
+              .
+
+            echo "Built images:"
+            docker images | grep ${IMAGE_NAME}
+          """
+        }
+      }
+    }
+
+    stage('Security Scan') {
+      steps {
+        echo "Scanning image for vulnerabilities"
+        sh """
+          # Install trivy
+          if ! command -v trivy &> /dev/null; then
+            curl -sfL \
+              https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
+              | sh -s -- -b /usr/local/bin
+          fi
+
+          # Run trivy scan
+          trivy image \
+            --exit-code 0 \
+            --severity HIGH,CRITICAL \
+            --no-progress \
+            ${ECR_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}
+        """
+      }
+    }
+
+    stage('Push to ECR') {
+      steps {
+        echo "Pushing image to ECR"
+        sh """
+          # Login to ECR
+          aws ecr get-login-password \
+            --region ${ECR_REGION} \
+          | docker login \
+            --username AWS \
+            --password-stdin \
+            ${ECR_REGISTRY}
+
+          # Push versioned tag
+          docker push ${ECR_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}
+
+          # Push latest tag — always points to newest image
+          docker push ${ECR_REGISTRY}/${IMAGE_NAME}:latest
+
+          echo "Pushed successfully:"
+          echo "  ${ECR_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}"
+          echo "  ${ECR_REGISTRY}/${IMAGE_NAME}:latest"
+        """
+      }
+    }
+
+    stage('Update Kustomization') {
+      steps {
+        echo "Updating image tag in kustomization.yaml"
+        sh """
+          # Show current tag before change
+          echo "Before:"
+          grep newTag kubernetes/overlays/aws/kustomization.yaml
+
+          # Update the tag to this build number
+          sed -i \
+            's|newTag:.*|newTag: "${IMAGE_TAG}"|g' \
+            kubernetes/overlays/aws/kustomization.yaml
+
+          # Show updated tag after change
+          echo "After:"
+          grep newTag kubernetes/overlays/aws/kustomization.yaml
+        """
+      }
+    }
+
+    stage('Deploy to EKS') {
+      steps {
+        echo "Deploying to EKS cluster ${EKS_CLUSTER}"
+        sh """
+          # Connect kubectl to EKS
+          aws eks update-kubeconfig \
+            --region ${ECR_REGION} \
+            --name ${EKS_CLUSTER}
+
+          # Verify cluster connection
+          echo "Connected to cluster:"
+          kubectl cluster-info
+
+          echo "Nodes:"
+          kubectl get nodes
+
+          # Apply using kustomize overlay
+          kubectl apply -k kubernetes/overlays/aws/
+
+          # Wait for rollout to complete
+          # fails the build if rollout does not finish in 120 seconds
+          kubectl rollout status deployment/portfolio-deployment \
+            --namespace ${K8S_NAMESPACE} \
+            --timeout=120s
+        """
+      }
+
+      post {
+        failure {
+          // Auto rollback if deployment fails
+          sh """
+            echo "Deployment failed — rolling back to previous version"
+            kubectl rollout undo deployment/portfolio-deployment \
+              --namespace ${K8S_NAMESPACE}
+
+            echo "Rollback complete — current state:"
+            kubectl get pods --namespace ${K8S_NAMESPACE}
+          """
+        }
+      }
+    }
+
+    stage('Verify Deployment') {
+      steps {
+        echo "Verifying deployment"
+        sh """
+          echo " Pods "
+          kubectl get pods \
+            --namespace ${K8S_NAMESPACE} \
+            --selector app=portfolio
+
+          echo " Deployment "
+          kubectl get deployment portfolio-deployment \
+            --namespace ${K8S_NAMESPACE}
+
+          echo " Service "
+          kubectl get service portfolio-service \
+            --namespace ${K8S_NAMESPACE}
+
+          echo " Ingress "
+          kubectl get ingress \
+            --namespace ${K8S_NAMESPACE}
+
+          echo " Image running "
+          kubectl describe deployment portfolio-deployment \
+            --namespace ${K8S_NAMESPACE} \
+            | grep Image:
+        """
+      }
+    }
+
+    stage('Health Check') {
+      steps {
+        echo "Health check on deployed app"
+        sh """
+          # Port-forward in background
+          kubectl port-forward \
+            deployment/portfolio-deployment \
+            3000:3000 \
+            --namespace ${K8S_NAMESPACE} &
+          PF_PID=\$!
+
+          # Wait for port-forward to be ready
+          sleep 5
+
+          # Check health endpoint
+          RESPONSE=\$(curl -s -o /dev/null -w "%{http_code}" \
+            http://localhost:3000/health)
+
+          # Kill port-forward
+          kill \$PF_PID 2>/dev/null || true
+
+          # Evaluate response
+          if [ "\$RESPONSE" = "200" ]; then
+            echo "Health check PASSED — app responding with 200"
+          else
+            echo "Health check FAILED — response was: \$RESPONSE"
+            exit 1
+          fi
+        """
+      }
+    }
+  }
+
+  post {
+    success {
+      echo """
+        PIPELINE SUCCEEDED 
+      """
+    }
+
+    failure {
+      echo """
+        PIPELINE FAILED
+      """
+    }
+
+    always {
+      echo "Cleaning up Docker images to free disk space"
+      sh """
+        docker rmi \
+          ${ECR_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG} \
+          2>/dev/null || true
+
+        docker rmi \
+          ${ECR_REGISTRY}/${IMAGE_NAME}:latest \
+          2>/dev/null || true
+
+        docker image prune -f 2>/dev/null || true
+
+        echo "Cleanup complete"
+      """
+    }
+  }
+}
