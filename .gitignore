@@ -8,4 +8,5 @@ terraform/aws/.terraform/
 terraform/aws/.terraform.lock.hcl
 terraform/aws/terraform.tfstate
 terraform/aws/terraform.tfstate.backup 
-ansible/aws_ec2.pem   
+ansible/aws_ec2.pem  
+.gitignore 
