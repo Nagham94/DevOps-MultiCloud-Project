@@ -19,8 +19,9 @@ spec:
     type: RollingUpdate
     rollingUpdate:
       # maximum number of replicas that can be unavailable during the update process
-      # one to ensure that at least one replica is always available to serve traffic
-      maxUnavailable: 1
+      # 0 means never take a pod down until the new one is fully ready
+      # this guarantees zero downtime during deployments
+      maxUnavailable: 0
       # maximum number of replicas that can be created above the desired number of replicas during the update process
       maxSurge: 1
   template:
@@ -39,7 +40,7 @@ spec:
       containers:
         - name: portfolio
           # container image to be used for the application
-          image: nagham94/website:v1
+          image: 254652353999.dkr.ecr.eu-north-1.amazonaws.com/portfolio-website:latest
           imagePullPolicy: Always
           ports:
             - containerPort: 3000
