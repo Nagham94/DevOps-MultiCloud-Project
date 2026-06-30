@@ -1,0 +1,134 @@
+---
+# ── kubectl ──────────────────────────────────────────────────
+- name: Get latest kubectl version
+  uri:
+    url: https://dl.k8s.io/release/stable.txt
+    return_content: yes
+  register: kubectl_version
+
+- name: Download kubectl
+  get_url:
+    url: "https://dl.k8s.io/release/{{ kubectl_version.content | trim }}/bin/linux/amd64/kubectl"
+    dest: /tmp/kubectl
+    mode: "0755"
+
+- name: Install kubectl
+  copy:
+    src: /tmp/kubectl
+    dest: /usr/local/bin/kubectl
+    mode: "0755"
+    remote_src: yes
+  become: yes
+
+- name: Verify kubectl
+  command: kubectl version --client
+  register: kubectl_ver
+  changed_when: false
+
+- name: Print kubectl version
+  debug:
+    msg: "{{ kubectl_ver.stdout }}"
+
+# ── Helm ─────────────────────────────────────────────────────
+- name: Install Helm
+  shell: |
+    curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+  args:
+    creates: /usr/local/bin/helm
+  become: yes
+
+- name: Verify Helm
+  command: helm version
+  register: helm_ver
+  changed_when: false
+
+- name: Print Helm version
+  debug:
+    msg: "{{ helm_ver.stdout }}"
+
+# ── .kube directories ─────────────────────────────────────────
+- name: Create .kube directory for ubuntu user
+  file:
+    path: /home/ubuntu/.kube
+    state: directory
+    owner: ubuntu
+    group: ubuntu
+    mode: "0700"
+  become: yes
+
+- name: Create .kube directory for jenkins user
+  file:
+    path: /var/lib/jenkins/.kube
+    state: directory
+    owner: jenkins
+    group: jenkins
+    mode: "0700"
+  become: yes
+
+# ── EKS kubeconfig for ubuntu user ───────────────────────────
+- name: Configure kubectl for EKS (ubuntu user)
+  shell: |
+    aws eks update-kubeconfig \
+      --region {{ eks_region }} \
+      --name {{ eks_cluster_name }}
+  become: yes
+  become_user: ubuntu
+  environment:
+    HOME: /home/ubuntu
+    AWS_DEFAULT_REGION: "{{ eks_region }}"
+
+- name: Set correct ownership on ubuntu kubeconfig
+  file:
+    path: /home/ubuntu/.kube/config
+    owner: ubuntu
+    group: ubuntu
+    mode: "0600"
+  become: yes
+
+- name: Verify EKS connection as ubuntu user
+  command: kubectl get nodes
+  become: yes
+  become_user: ubuntu
+  environment:
+    HOME: /home/ubuntu
+    KUBECONFIG: /home/ubuntu/.kube/config
+  register: eks_nodes_ubuntu
+  changed_when: false
+
+- name: Print EKS nodes
+  debug:
+    msg: "{{ eks_nodes_ubuntu.stdout_lines }}"
+
+# ── Copy kubeconfig to Jenkins user ──────────────────────────
+# Jenkins pipeline runs kubectl commands
+# Jenkins user needs kubeconfig to authenticate with EKS
+
+- name: Copy kubeconfig to Jenkins user
+  copy:
+    src: /home/ubuntu/.kube/config
+    dest: /var/lib/jenkins/.kube/config
+    remote_src: yes
+    owner: jenkins
+    group: jenkins
+    mode: "0600"
+  become: yes
+
+- name: Verify Jenkins can reach EKS
+  command: kubectl get nodes
+  become: yes
+  become_user: jenkins
+  environment:
+    HOME: /var/lib/jenkins
+    KUBECONFIG: /var/lib/jenkins/.kube/config
+  register: eks_nodes_jenkins
+  changed_when: false
+
+- name: Print EKS nodes as Jenkins user
+  debug:
+    msg: "{{ eks_nodes_jenkins.stdout_lines }}"
+
+- name: Confirm Jenkins kubectl access
+  debug:
+    msg: |
+      Jenkins user can reach EKS successfully
+      Nodes: {{ eks_nodes_jenkins.stdout_lines | length }} node(s) found

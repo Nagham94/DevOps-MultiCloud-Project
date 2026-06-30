@@ -1,0 +1,44 @@
+# ansible/roles/awscli/tasks/main.yml
+
+- name: Check if AWS CLI is already installed
+  command: aws --version
+  register: aws_installed
+  changed_when: false
+  failed_when: false
+
+- name: Download AWS CLI installer
+  get_url:
+    url: "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip"
+    dest: /tmp/awscliv2.zip
+  when: aws_installed.rc != 0
+
+- name: Unzip AWS CLI installer
+  unarchive:
+    src: /tmp/awscliv2.zip
+    dest: /tmp/
+    remote_src: yes
+  when: aws_installed.rc != 0
+  become: yes
+
+- name: Install AWS CLI
+  shell: /tmp/aws/install --update
+  when: aws_installed.rc != 0
+  become: yes
+
+- name: Verify AWS CLI
+  command: aws --version
+  register: aws_ver
+  changed_when: false
+
+- name: Print AWS CLI version
+  debug:
+    msg: "{{ aws_ver.stdout }}"
+
+- name: Clean up installer files
+  file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /tmp/awscliv2.zip
+    - /tmp/aws
+  become: yes

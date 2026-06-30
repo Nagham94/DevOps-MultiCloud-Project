@@ -1,0 +1,62 @@
+---
+- name: Configure AWS EC2 — full setup
+  hosts: ec2
+  gather_facts: yes
+  become: yes
+  vars:
+    eks_cluster_name: "{{ eks_cluster_name | default('eks-prod-dr') }}"
+    eks_region:       "{{ eks_region | default('eu-north-1') }}"
+
+  pre_tasks:
+    - name: Verify we can connect
+      ping:
+      tags: always
+
+    - name: Print OS information
+      debug:
+        msg: >
+          Configuring {{ inventory_hostname }}
+          running {{ ansible_distribution }}
+          {{ ansible_distribution_version }}
+      tags: always
+
+  roles:
+    - role: common_aws
+      tags: common
+
+    - role: docker_aws
+      tags: docker
+
+    - role: awscli
+      tags: awscli
+
+    - role: jenkins
+      tags: jenkins
+
+    - role: kubectl_aws
+      tags: kubectl
+
+  post_tasks:
+    - name: Verify Docker is running
+      systemd:
+        name: docker
+      register: docker_status
+      changed_when: false
+      tags: always
+
+    - name: Print final status
+      debug:
+        msg: |
+          EC2 Configuration Complete
+            Docker:  running
+            kubectl: installed
+            Helm:    installed
+            AWS CLI: installed
+            EKS:      connected
+      tags: always
+
+  handlers:
+    - name: restart sshd
+      systemd:
+        name: sshd
+        state: restarted

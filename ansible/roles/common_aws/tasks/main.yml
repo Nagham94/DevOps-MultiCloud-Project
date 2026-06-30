@@ -1,0 +1,63 @@
+# ansible/roles/common_aws/tasks/main.yml
+
+- name: Update apt cache
+  apt:
+    update_cache: yes
+    cache_valid_time: 3600
+  become: yes
+
+- name: Upgrade all packages
+  apt:
+    upgrade: dist
+  become: yes
+
+- name: Install basic tools
+  apt:
+    name:
+      - curl
+      - wget
+      - git
+      - unzip
+      - software-properties-common
+      - apt-transport-https
+      - ca-certificates
+      - gnupg
+      - lsb-release
+      - python3
+      - python3-pip
+    state: present
+  become: yes
+
+- name: Set timezone to UTC
+  timezone:
+    name: UTC
+  become: yes
+
+- name: Disable password authentication in SSH
+  lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: "^PasswordAuthentication"
+    line: "PasswordAuthentication no"
+    state: present
+  become: yes
+  notify: restart sshd
+
+- name: Set up UFW firewall — deny all inbound
+  ufw:
+    state: enabled
+    policy: deny
+    direction: incoming
+  become: yes
+
+- name: Allow all outbound
+  ufw:
+    rule: allow
+    direction: out
+  become: yes
+
+# CHANGED: AWS VPC CIDR is 10.1.0.0/16 not 10.0.0.0/8
+- name: Allow traffic from AWS VPC only
+  ufw:
+    rule: allow
+    src: "10.1.0.0/16"
+  become: yes

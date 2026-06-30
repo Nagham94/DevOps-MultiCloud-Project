@@ -1,6 +1,37 @@
-- name: Install Java 17
+---
+# ── Pre-cleanup: Remove broken repos before ANY apt call ─────
+- name: Remove any broken Jenkins repo files from previous runs
+  file:
+    path: "{{ item }}"
+    state: absent
+  become: yes
+  loop:
+    - /etc/apt/sources.list.d/jenkins.list
+    - /etc/apt/sources.list.d/jenkins_io_debian_stable.list
+
+- name: Remove stale Jenkins keyring from previous runs
+  file:
+    path: /etc/apt/keyrings/jenkins.gpg
+    state: absent
+  become: yes
+
+- name: Clean apt cache to reset state
+  shell: apt-get clean && rm -rf /var/lib/apt/lists/*
+  become: yes
+  args:
+    executable: /bin/bash
+
+- name: Run apt-get update fresh after cleanup
+  shell: apt-get update 2>&1
+  register: initial_apt_update
+  become: yes
+  changed_when: false
+  failed_when: initial_apt_update.rc != 0
+
+# ── Java ─────────────────────────────────────────────────────
+- name: Install Java 21
   apt:
-    name: openjdk-17-jdk
+    name: openjdk-21-jdk
     state: present
     update_cache: yes
   become: yes
@@ -10,18 +41,134 @@
   register: java_version
   changed_when: false
 
-- name: Add Jenkins GPG key
-  apt_key:
-    url: https://pkg.jenkins.io/debian-stable/jenkins.io-2023.key
+- name: Print Java version
+  debug:
+    msg: "{{ java_version.stderr }}"
+
+- name: Include EFS mounting tasks
+  include_tasks: efs-mount.yml
+  when: efs_dns_name is defined
+
+# ── Jenkins GPG Key ───────────────────────────────────────────
+- name: Install gnupg and curl
+  apt:
+    name:
+      - gnupg
+      - curl
     state: present
   become: yes
 
-- name: Add Jenkins repository
+- name: Create apt keyrings directory
+  file:
+    path: /etc/apt/keyrings
+    state: directory
+    mode: "0755"
+    owner: root
+    group: root
+  become: yes
+
+- name: Remove stale Jenkins keyring if present
+  file:
+    path: /etc/apt/keyrings/jenkins.gpg
+    state: absent
+  become: yes
+
+- name: Create temp GPG home directory
+  file:
+    path: /tmp/jenkins-gpg-tmp
+    state: directory
+    mode: "0700"
+    owner: root
+    group: root
+  become: yes
+
+- name: Import Jenkins GPG key from keyserver
+  shell: |
+    gpg --batch --yes \
+        --keyserver hkps://keyserver.ubuntu.com \
+        --recv-keys 7198F4B714ABFC68
+  become: yes
+  args:
+    executable: /bin/bash
+  environment:
+    GNUPGHOME: /tmp/jenkins-gpg-tmp
+  register: gpg_import
+  retries: 3
+  delay: 5
+  until: gpg_import.rc == 0
+
+- name: Export Jenkins key to apt keyring
+  shell: |
+    gpg --batch --yes \
+        --export 7198F4B714ABFC68 \
+        > /etc/apt/keyrings/jenkins.gpg
+  become: yes
+  args:
+    executable: /bin/bash
+  environment:
+    GNUPGHOME: /tmp/jenkins-gpg-tmp
+
+- name: Set keyring permissions
+  file:
+    path: /etc/apt/keyrings/jenkins.gpg
+    owner: root
+    group: root
+    mode: "0644"
+  become: yes
+
+- name: Verify the keyring contains the correct key ID
+  shell: gpg --show-keys /etc/apt/keyrings/jenkins.gpg 2>&1
+  register: keyring_check
+  changed_when: false
+  become: yes
+
+- name: Print key IDs found in keyring
+  debug:
+    msg: "{{ keyring_check.stdout_lines }}"
+
+- name: Fail if correct key ID is not in keyring
+  fail:
+    msg: "Key 7198F4B714ABFC68 not found in keyring! Got: {{ keyring_check.stdout }}"
+  when: "'7198F4B714ABFC68' not in keyring_check.stdout | upper"
+
+- name: Clean up temp GPG directory
+  file:
+    path: /tmp/jenkins-gpg-tmp
+    state: absent
+  become: yes
+
+# ── Jenkins Repository ────────────────────────────────────────
+- name: Remove any existing broken Jenkins repo file
+  file:
+    path: "{{ item }}"
+    state: absent
+  become: yes
+  loop:
+    - /etc/apt/sources.list.d/jenkins.list
+    - /etc/apt/sources.list.d/jenkins_io_debian_stable.list
+
+- name: Add Jenkins apt repository
   apt_repository:
-    repo: deb https://pkg.jenkins.io/debian-stable binary/
+    repo: "deb [signed-by=/etc/apt/keyrings/jenkins.gpg] https://pkg.jenkins.io/debian-stable binary/"
+    filename: jenkins
     state: present
+    update_cache: no
   become: yes
 
+- name: Update apt cache
+  shell: apt-get update 2>&1
+  register: apt_update_result
+  changed_when: false
+  become: yes
+  failed_when: >
+    apt_update_result.rc != 0 and
+    'jenkins' in apt_update_result.stdout
+
+- name: Show apt update result
+  debug:
+    msg: "{{ apt_update_result.stdout_lines }}"
+
+# ── Jenkins Install ───────────────────────────────────────────
 - name: Install Jenkins
   apt:
     name: jenkins
@@ -29,32 +176,100 @@
     update_cache: yes
   become: yes
 
+# ── Java override for Jenkins systemd service ─────────────────
+- name: Create Jenkins systemd override directory
+  file:
+    path: /etc/systemd/system/jenkins.service.d
+    state: directory
+    mode: "0755"
+  become: yes
+
+- name: Write Jenkins systemd override to use Java 21
+  copy:
+    dest: /etc/systemd/system/jenkins.service.d/override.conf
+    content: |
+      [Service]
+      Environment="JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64"
+      Environment="PATH=/usr/lib/jvm/java-21-openjdk-amd64/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+    mode: "0644"
+  become: yes
+
+- name: Reload systemd daemon
+  systemd:
+    daemon_reload: yes
+  become: yes
+
+# ── Jenkins Admin User Setup ──────────────────────────────────
+- name: Stop Jenkins if already running
+  systemd:
+    name: jenkins
+    state: stopped
+  become: yes
+  ignore_errors: yes
+
+- name: Ensure Jenkins init.groovy.d directory exists
+  file:
+    path: /var/lib/jenkins/init.groovy.d
+    state: directory
+    owner: jenkins
+    group: jenkins
+    mode: "0755"
+  become: yes
+
+- name: Create Jenkins admin user via Groovy init script
+  copy:
+    dest: /var/lib/jenkins/init.groovy.d/basic-security.groovy
+    owner: jenkins
+    group: jenkins
+    mode: "0640"
+    content: |
+      import jenkins.model.*
+      import hudson.security.*
+
+      def instance = Jenkins.get()
+      def hudsonRealm = new HudsonPrivateSecurityRealm(false)
+
+      hudsonRealm.createAccount(
+          "{{ jenkins_admin_user }}",
+          "{{ jenkins_admin_password }}"
+      )
+
+      instance.setSecurityRealm(hudsonRealm)
+
+      def strategy = new FullControlOnceLoggedInAuthorizationStrategy()
+      strategy.setAllowAnonymousRead(false)
+      instance.setAuthorizationStrategy(strategy)
+      instance.save()
+  become: yes
+  #no_log: true
+
+# ── Enable and Start Jenkins ──────────────────────────────────
 - name: Enable and start Jenkins
   systemd:
     name: jenkins
     enabled: yes
     state: started
+    daemon_reload: yes
   become: yes
 
-- name: Wait for Jenkins to start
+- name: Wait for Jenkins to start on port 8080
   wait_for:
     port: 8080
     delay: 15
     timeout: 120
-  # Waits until port 8080 is open before continuing
 
-- name: Get Jenkins initial admin password
-  command: cat /var/lib/jenkins/secrets/initialAdminPassword
-  register: jenkins_password
-  become: yes
+- name: Confirm Jenkins is running
+  systemd:
+    name: jenkins
+  register: jenkins_status
   changed_when: false
+  become: yes
 
-- name: Print Jenkins initial password
+- name: Print Jenkins service status
   debug:
-    msg: "Jenkins initial password: {{ jenkins_password.stdout }}"
-  # This prints the password in the Ansible output
-  # to use it when you first open Jenkins
+    msg: "Jenkins is {{ jenkins_status.status.ActiveState }}"
 
+# ── Post Install ──────────────────────────────────────────────
 - name: Add jenkins user to docker group
   user:
     name: jenkins
@@ -62,7 +277,7 @@
     append: yes
   become: yes
 
-- name: Restart Jenkins so docker group takes effect
+- name: Restart Jenkins for docker group to take effect
   systemd:
     name: jenkins
     state: restarted
@@ -76,3 +291,7 @@
     group: jenkins
     mode: "0755"
   become: yes
+
+- name: Print Jenkins setup complete message
+  debug:
+    msg: "Jenkins is ready. Login at http://{{ inventory_hostname }}:8080 with user: {{ jenkins_admin_user }}"

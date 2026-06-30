@@ -1,0 +1,51 @@
+- name: Install NFS client
+  apt:
+    name: nfs-common
+    state: present
+  become: yes
+
+- name: Stop Jenkins before mounting EFS
+  systemd:
+    name: jenkins
+    state: stopped
+  become: yes
+  ignore_errors: yes
+
+- name: Create mount point
+  file:
+    path: /var/lib/jenkins
+    state: directory
+    owner: jenkins
+    group: jenkins
+    mode: "0755"
+  become: yes
+
+- name: Mount EFS at Jenkins home
+  mount:
+    path: /var/lib/jenkins
+    src: "{{ efs_dns_name }}:/"
+    fstype: nfs4
+    opts: "nfsvers=4.1,rsize=1048576,wsize=1048576,hard,timeo=600,retrans=2,noresvport"
+    state: mounted
+  become: yes
+
+- name: Fix ownership after mount
+  file:
+    path: /var/lib/jenkins
+    owner: jenkins
+    group: jenkins
+    recurse: yes
+  become: yes
+
+- name: Start Jenkins
+  systemd:
+    name: jenkins
+    state: started
+    enabled: yes
+  become: yes
+
+- name: Wait for Jenkins to be ready
+  wait_for:
+    port: 8080
+    delay: 15
+    timeout: 120

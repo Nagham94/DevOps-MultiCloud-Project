@@ -12,6 +12,18 @@ module "compute" {
   tags               = var.tags
   vpc_id             = module.networking.vpc_id
   private_subnet_ids = module.networking.private_subnet_ids
-  security_group_id  = module.networking.security_group_id
-  instance_type      = var.instance_type
+  # security_group_id  = module.networking.security_group_id
+  instance_type                 = var.instance_type
+  kubernetes_version            = var.kubernetes_version
+  eks_cluster_security_group_id = module.networking.eks_cluster_security_group_id
+  eks_nodes_security_group_id   = module.networking.eks_nodes_security_group_id
+}
+
+module "preserved_efs" {
+  source                      = "./modules/preserved_efs"
+  environment                 = var.environment
+  tags                        = var.tags
+  vpc_id                      = module.networking.vpc_id
+  private_subnet_ids          = module.networking.private_subnet_ids
+  eks_nodes_security_group_id = module.networking.eks_nodes_security_group_id
 }
