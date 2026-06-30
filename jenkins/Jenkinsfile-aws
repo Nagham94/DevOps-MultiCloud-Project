@@ -77,7 +77,6 @@ pipeline {
       steps {
         echo "Building Docker image"
         echo "Image: ${ECR_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}"
-        dir('website') {
           sh """
             docker build \
               --no-cache \
@@ -90,7 +89,6 @@ pipeline {
             echo "Built images:"
             docker images | grep ${IMAGE_NAME}
           """
-        }
       }
     }
 
