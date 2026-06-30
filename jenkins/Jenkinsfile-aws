@@ -96,12 +96,6 @@ pipeline {
       steps {
         echo "Scanning image for vulnerabilities"
         sh """
-          # Install trivy
-          if ! command -v trivy &> /dev/null; then
-            curl -sfL \
-              https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
-              | sh -s -- -b /usr/local/bin
-          fi
 
           # Run trivy scan
           trivy image \
