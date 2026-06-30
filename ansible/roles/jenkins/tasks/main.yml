@@ -45,6 +45,28 @@
   debug:
     msg: "{{ java_version.stderr }}"
 
+# Install Node.js and npm (simple apt install; replace with NodeSource if you need newer versions)
+- name: Install Node.js and npm
+  apt:
+    name:
+      - nodejs
+      - npm
+    state: present
+    update_cache: yes
+  become: yes
+
+# Install trivy (idempotent: only installs when binary missing)
+- name: Install Trivy
+  shell: |
+    if ! command -v trivy &> /dev/null; then
+      curl -sfL \
+        https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
+        | sh -s -- -b /usr/local/bin
+    fi
+  args:
+    executable: /bin/bash
+  become: yes
+
 - name: Include EFS mounting tasks
   include_tasks: efs-mount.yml
   when: efs_dns_name is defined

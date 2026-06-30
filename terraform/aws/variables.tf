@@ -36,6 +36,6 @@ variable "kubernetes_version" {
 #INSTANCE_ID=$(terraform output -raw instance_id)
 #echo $INSTANCE_ID
 #aws ssm start-session   --target $INSTANCE_ID   --document-name AWS-StartPortForwardingSession   --parameters '{"portNumber":["22"],"localPortNumber":["2222"]}'   --region eu-north-1
-#ANSIBLE_CONFIG=ansible/aws.cfg ansible-playbook   -i ansible/inventory/aws.ini   ansible/playbooks/setup-ec2.yml   -e "eks_cluster_name=eks-prod-dr eks_region=eu-north-1"   --ask-vault-pass   -v
+#ANSIBLE_CONFIG=aws.cfg ansible-playbook   -i ansible/inventory/aws.ini   ansible/playbooks/setup-ec2.yml   -e "eks_cluster_name=eks-prod-dr eks_region=eu-north-1"   --ask-vault-pass   -v
 #aws ssm start-session   --target $INSTANCE_ID   --document-name AWS-StartPortForwardingSession   --parameters '{"portNumber":["8080"],"localPortNumber":["8080"]}'
 
