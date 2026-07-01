@@ -119,24 +119,6 @@ resource "aws_instance" "main" {
     delete_on_termination = true
     encrypted             = true
   }
-  /*
-  user_data = <<-EOF
-    #!/bin/bash
-    apt-get update -y
-    apt-get install -y \
-      docker.io \
-      awscli \
-      amazon-ssm-agent
-
-    # Start and enable Docker
-    systemctl enable docker
-    systemctl start docker
-
-    # Start SSM agent — this is what allows Session Manager access
-    systemctl enable amazon-ssm-agent
-    systemctl start amazon-ssm-agent
-  EOF
-*/
 
   tags = merge(var.tags, { Name = "ec2-app-${var.environment}" })
 }
@@ -145,6 +127,7 @@ resource "aws_ecr_repository" "portfolio" {
   name                 = "portfolio-website"
   image_tag_mutability = "MUTABLE"
   tags                 = var.tags
+  force_delete = true
 
   # Scan images for vulnerabilities on every push
   image_scanning_configuration {
