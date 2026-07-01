@@ -1,0 +1,41 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: portfolio-aws
+  namespace: argocd
+  # Finalizer ensures ArgoCD cleans up resources
+  # when the application is deleted from ArgoCD
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+
+  source:
+    repoURL: https://github.com/Nagham94/DevOps-MultiCloud-Project
+    targetRevision: main
+    path: kubernetes/overlays/aws
+
+  destination:
+    # kubernetes.default.svc means deploy to the same cluster ArgoCD runs on
+    server: https://kubernetes.default.svc
+    namespace: portfolio
+
+  syncPolicy:
+    automated:
+      # Delete resources from cluster when removed from Git
+      prune: true
+      # Fix manual changes made directly to the cluster
+      selfHeal: true
+    syncOptions:
+      # Create namespace if it does not exist
+      - CreateNamespace=true
+      # Only sync resources that are out of sync
+      - ApplyOutOfSyncOnly=true
+      # Show detailed diff in ArgoCD UI
+      - ServerSideApply=true
+    retry:
+      limit: 3
+      backoff:
+        duration: 5s
+        maxDuration: 3m
+        factor: 2
