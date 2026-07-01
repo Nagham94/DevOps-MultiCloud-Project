@@ -9,14 +9,20 @@ pipeline {
     IMAGE_NAME      = "portfolio-website"
     IMAGE_TAG       = "${BUILD_NUMBER}"
 
-    // EKS configuration
-    EKS_CLUSTER     = "eks-prod-dr"
-    K8S_NAMESPACE   = "portfolio"
+    // EKS and ArgoCD configuration
+    EKS_CLUSTER    = "eks-prod-dr"
+    K8S_NAMESPACE  = "portfolio"
+    ARGOCD_APP     = "portfolio-aws"
+    ARGOCD_NS      = "argocd"
 
     // AWS credentials from Jenkins credential store
     AWS_ACCESS_KEY_ID     = credentials('aws-access-key-id')
     AWS_SECRET_ACCESS_KEY = credentials('aws-secret-access-key')
     AWS_DEFAULT_REGION    = "${ECR_REGION}"
+
+    // GitHub credentials for git push
+    GIT_CREDENTIALS = credentials('github-credentials')
+    GIT_REPO        = "github.com/yourusername/devops-multicloud-project.git"
   }
 
   options {
@@ -132,15 +138,16 @@ pipeline {
       }
     }
 
-    stage('Update Kustomization') {
+    // Instead it updates the Git manifest and ArgoCD does the deployment
+    stage('Update Git Manifest') {
       steps {
-        echo "Updating image tag in kustomization.yaml"
+        echo "Updating kustomization.yaml with new image tag"
         sh """
           # Show current tag before change
           echo "Before:"
           grep newTag kubernetes/overlays/aws/kustomization.yaml
 
-          # Update the tag to this build number
+          # Update the image tag to this build number
           sed -i \
             's|newTag:.*|newTag: "${IMAGE_TAG}"|g' \
             kubernetes/overlays/aws/kustomization.yaml
@@ -152,45 +159,86 @@ pipeline {
       }
     }
 
-    stage('Deploy to EKS') {
+    stage('Commit and Push Manifest') {
       steps {
-        echo "Deploying to EKS cluster ${EKS_CLUSTER}"
+        echo "Committing updated manifest to GitHub"
         sh """
-          # Connect kubectl to EKS
+          # Configure git identity for this commit
+          git config user.email "jenkins@pipeline.com"
+          git config user.name "Jenkins CI"
+
+          # Stage only the kustomization file
+          git add kubernetes/overlays/aws/kustomization.yaml
+
+          # Check if there are changes to commit
+          # If the tag did not change (same build number) skip the commit
+          if git diff --staged --quiet; then
+            echo "No changes to commit — skipping"
+          else
+            # Commit with [skip ci] to prevent infinite pipeline loop
+            git commit -m "CI: update AWS image tag to ${IMAGE_TAG} [skip ci]"
+
+            # Push using stored GitHub credentials
+            git push \
+              https://${GIT_CREDENTIALS_USR}:${GIT_CREDENTIALS_PSW}@${GIT_REPO} \
+              HEAD:main
+
+            echo "Manifest pushed to GitHub"
+            echo "ArgoCD will detect this change and sync automatically"
+          fi
+        """
+      }
+    }
+
+   
+    stage('Wait for ArgoCD Sync') {
+      steps {
+        echo "Waiting for ArgoCD to sync and deploy"
+        sh """
+          # Connect kubectl to EKS so we can check ArgoCD status
           aws eks update-kubeconfig \
             --region ${ECR_REGION} \
             --name ${EKS_CLUSTER}
 
-          # Verify cluster connection
-          echo "Connected to cluster:"
-          kubectl cluster-info
+          echo "Waiting for ArgoCD to detect Git change and sync..."
+          echo "This usually takes 30-90 seconds"
 
-          echo "Nodes:"
-          kubectl get nodes
+          # Poll ArgoCD every 10 seconds for up to 10 minutes
+          for i in \$(seq 1 60); do
 
-          # Apply using kustomize overlay
-          kubectl apply -k kubernetes/overlays/aws/
+            SYNC_STATUS=\$(kubectl get application ${ARGOCD_APP} \
+              -n ${ARGOCD_NS} \
+              -o jsonpath='{.status.sync.status}' 2>/dev/null || echo "Unknown")
 
-          # Wait for rollout to complete
-          # fails the build if rollout does not finish in 120 seconds
-          kubectl rollout status deployment/portfolio-deployment \
-            --namespace ${K8S_NAMESPACE} \
-            --timeout=120s
+            HEALTH_STATUS=\$(kubectl get application ${ARGOCD_APP} \
+              -n ${ARGOCD_NS} \
+              -o jsonpath='{.status.health.status}' 2>/dev/null || echo "Unknown")
+
+            echo "Attempt \$i/60 — Sync: \$SYNC_STATUS | Health: \$HEALTH_STATUS"
+
+            # Success condition: Synced AND Healthy
+            if [ "\$SYNC_STATUS" = "Synced" ] && \
+               [ "\$HEALTH_STATUS" = "Healthy" ]; then
+              echo "ArgoCD sync complete — application is Healthy"
+              exit 0
+            fi
+
+            # If OutOfSync but progressing that is normal — keep waiting
+            # If Degraded something went wrong
+            if [ "\$HEALTH_STATUS" = "Degraded" ]; then
+              echo "Application health is Degraded — deployment may have failed"
+              kubectl describe application ${ARGOCD_APP} -n ${ARGOCD_NS}
+              exit 1
+            fi
+
+            sleep 10
+          done
+
+          # If we reach here ArgoCD did not sync within 10 minutes
+          echo "Timeout: ArgoCD did not sync within 10 minutes"
+          kubectl describe application ${ARGOCD_APP} -n ${ARGOCD_NS}
+          exit 1
         """
-      }
-
-      post {
-        failure {
-          // Auto rollback if deployment fails
-          sh """
-            echo "Deployment failed — rolling back to previous version"
-            kubectl rollout undo deployment/portfolio-deployment \
-              --namespace ${K8S_NAMESPACE}
-
-            echo "Rollback complete — current state:"
-            kubectl get pods --namespace ${K8S_NAMESPACE}
-          """
-        }
       }
     }
 
@@ -255,70 +303,6 @@ pipeline {
       }
     }
 
-    stage('Deploy ArgoCD Application') {
-  steps {
-    echo "Deploying ArgoCD Application"
-
-    sh """
-      # Configure kubectl
-      aws eks update-kubeconfig \
-        --region ${ECR_REGION} \
-        --name ${EKS_CLUSTER}
-
-      echo "Applying ArgoCD Application..."
-      kubectl apply -f kubernetes/argocd/portfolio-aws.yaml
-
-      echo ""
-      echo "Waiting for Application CRD..."
-      kubectl wait \
-        --for=create \
-        application/portfolio-aws \
-        -n argocd \
-        --timeout=60s || true
-
-      echo ""
-      echo "Application:"
-      kubectl get application portfolio-aws -n argocd
-
-      echo ""
-      echo "Application details:"
-      kubectl describe application portfolio-aws -n argocd
-    """
-  }
-}
-
-    stage('Wait for ArgoCD Sync') {
-  steps {
-    sh """
-      echo "Waiting for application to become Healthy..."
-
-      for i in {1..60}; do
-
-        SYNC_STATUS=\$(kubectl get application portfolio-aws \
-          -n argocd \
-          -o jsonpath='{.status.sync.status}' 2>/dev/null)
-
-        HEALTH_STATUS=\$(kubectl get application portfolio-aws \
-          -n argocd \
-          -o jsonpath='{.status.health.status}' 2>/dev/null)
-
-        echo "Sync=\$SYNC_STATUS Health=\$HEALTH_STATUS"
-
-        if [ "\$SYNC_STATUS" = "Synced" ] && \
-           [ "\$HEALTH_STATUS" = "Healthy" ]; then
-          echo "Application deployed successfully."
-          exit 0
-        fi
-
-        sleep 10
-      done
-
-      echo "Application did not become Healthy."
-      kubectl describe application portfolio-aws -n argocd
-      exit 1
-    """
-  }
-}
   }
 
   post {
