@@ -119,20 +119,17 @@ resource "azurerm_kubernetes_cluster" "main" {
   }
 }
 
-# ignored due to free tier limits
-/*
-# Separate from system pool to run the application workloads.
-# to scale and manage the app nodes independently from the system nodes, which are critical for cluster operations. 
-# We can also apply different node labels and taints if needed in the future.
+# Separate app node pool for running portfolio deployments
+# (System node pool is auto-created in default_node_pool above)
 resource "azurerm_kubernetes_cluster_node_pool" "app" {
   name                  = "app"
   kubernetes_cluster_id = azurerm_kubernetes_cluster.main.id
   vm_size               = "Standard_D2s_v3"
   vnet_subnet_id        = var.aks_subnet_id
   os_disk_size_gb       = 50
-  auto_scaling_enabled = true
+  auto_scaling_enabled  = true
   min_count             = 1
-  max_count             = 5
+  max_count             = 3
   tags                  = var.tags
 
   node_labels = {
@@ -140,7 +137,6 @@ resource "azurerm_kubernetes_cluster_node_pool" "app" {
     "environment"   = var.environment
   }
 }
-*/
 
 # AKS uses Managed Identity to pull images from ACR
 # No username or password needed
@@ -151,10 +147,54 @@ resource "azurerm_role_assignment" "aks_acr_pull" {
   depends_on           = [azurerm_kubernetes_cluster.main]
 }
 
+# ── Storage Account for Jenkins (persistent data via Azure Files) ──
+# Azure Files Share for Jenkins home directory (DR equivalent to AWS EFS)
+resource "azurerm_storage_account" "jenkins" {
+  name                     = "st${replace(var.environment, "-", "")}jenkins"
+  resource_group_name      = var.resource_group_name
+  location                 = var.location
+  account_tier             = "Standard"
+  account_replication_type = "LRS"
+  https_traffic_only_enabled = true
+  tags                     = var.tags
+}
+
+# Network rule for storage account — only allow VNet
+resource "azurerm_storage_account_network_rules" "jenkins" {
+  storage_account_id = azurerm_storage_account.jenkins.id
+  default_action     = "Deny"
+  virtual_network_subnet_ids = [var.private_subnet_id, var.aks_subnet_id]
+  bypass                     = ["AzureServices"]
+}
+
+# Jenkins file share
+resource "azurerm_storage_share" "jenkins" {
+  name               = "jenkins-home"
+  storage_account_id = azurerm_storage_account.jenkins.id
+  quota              = 100
+}
+
+# Private endpoint for storage account (Jenkins VM access)
+resource "azurerm_private_endpoint" "jenkins_storage" {
+  name                = "pe-storage-jenkins-${var.environment}"
+  location            = var.location
+  resource_group_name = var.resource_group_name
+  subnet_id           = var.private_subnet_id
+  tags                = var.tags
+
+  private_service_connection {
+    name                           = "psc-storage-jenkins-${var.environment}"
+    private_connection_resource_id = azurerm_storage_account.jenkins.id
+    subresource_names              = ["file"]
+    is_manual_connection           = false
+  }
+}
+
+# SSH Key Storage
 resource "local_file" "ssh_private_key" {
-  content         = tls_private_key.key.private_key_pem
-  filename        = pathexpand("~/.ssh/jenkins_vm.pem")
-  file_permission = "0400"
+  content             = tls_private_key.key.private_key_pem
+  filename            = pathexpand("~/.ssh/jenkins_vm_azure.pem")
+  file_permission     = "0400"
 
   depends_on = [azurerm_linux_virtual_machine.jenkins]
 }

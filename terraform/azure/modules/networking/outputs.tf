@@ -32,3 +32,8 @@ output "endpoints_subnet_id" {
   description = "The ID of the endpoints subnet"
   value       = azurerm_subnet.endpoints.id
 }
+
+output "vnet_id" {
+  description = "The ID of the virtual network"
+  value       = azurerm_virtual_network.vnet.id
+}

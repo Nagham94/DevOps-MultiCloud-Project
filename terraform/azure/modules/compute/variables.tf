@@ -47,3 +47,8 @@ variable "acr_id" {
   description = "The ID of the Azure Container Registry to allow AKS to pull images from"
   type        = string
 }
+
+variable "vnet_id" {
+  description = "The ID of the VNet for private endpoint access"
+  type        = string
+}

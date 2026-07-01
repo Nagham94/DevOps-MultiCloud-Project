@@ -33,6 +33,7 @@ module "compute" {
   vm_size             = var.vm_size
   aks_subnet_id       = module.networking.aks_subnet_id
   acr_id              = module.security.acr_id
+  vnet_id             = module.networking.vnet_id
 }
 
 # Traffic Manager Profile
