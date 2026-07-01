@@ -255,6 +255,38 @@ pipeline {
       }
     }
 
+    stage('Deploy ArgoCD Application') {
+  steps {
+    echo "Deploying ArgoCD Application"
+
+    sh """
+      # Configure kubectl
+      aws eks update-kubeconfig \
+        --region ${ECR_REGION} \
+        --name ${EKS_CLUSTER}
+
+      echo "Applying ArgoCD Application..."
+      kubectl apply -f kubernetes/argocd/portfolio-aws.yaml
+
+      echo ""
+      echo "Waiting for Application CRD..."
+      kubectl wait \
+        --for=create \
+        application/portfolio-aws \
+        -n argocd \
+        --timeout=60s || true
+
+      echo ""
+      echo "Application:"
+      kubectl get application portfolio-aws -n argocd
+
+      echo ""
+      echo "Application details:"
+      kubectl describe application portfolio-aws -n argocd
+    """
+  }
+}
+
     stage('Wait for ArgoCD Sync') {
   steps {
     sh """
