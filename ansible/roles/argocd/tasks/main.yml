@@ -1,8 +1,8 @@
 # ansible/roles/argocd/tasks/main.yml
 ---
 
-# ── Verify EKS connection ─────────────────────────────────────
-- name: Verify kubectl is connected to EKS
+# ── Verify cluster connection ──────────────────────────────────
+- name: Verify kubectl is connected to the cluster
   command: kubectl cluster-info
   become_user: ubuntu
   environment:
@@ -185,9 +185,9 @@
     msg: "{{ argocd_cli_ver.stdout }}"
 
 # ── Apply ArgoCD Application manifests ───────────────────────
-- name: Check if portfolio-aws application exists
+- name: Check if ArgoCD application exists
   shell: |
-    kubectl get application portfolio-aws \
+    kubectl get application {{ argocd_application_name }} \
       -n {{ argocd_namespace }} \
       --no-headers 2>/dev/null | wc -l
   become_user: ubuntu
@@ -197,10 +197,20 @@
   register: argocd_app_check
   changed_when: false
 
-- name: Apply ArgoCD portfolio-aws application
+- name: Copy ArgoCD application manifest to the remote host
+  copy:
+    src: "{{ playbook_dir }}/../../kubernetes/argocd/{{ argocd_manifest }}"
+    dest: /home/ubuntu/{{ argocd_manifest }}
+    owner: ubuntu
+    group: ubuntu
+    mode: "0644"
+  become: yes
+  when: argocd_app_check.stdout == "0"
+
+- name: Apply ArgoCD application manifest
   shell: |
     kubectl apply \
-      -f /home/ubuntu/devops-multicloud-project/kubernetes/argocd/portfolio-aws.yaml
+      -f /home/ubuntu/{{ argocd_manifest }}
   become_user: ubuntu
   environment:
     HOME: /home/ubuntu

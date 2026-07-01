@@ -1,8 +1,11 @@
 ---
-- name: Configure Jenkins VM — full setup
+- name: Configure Azure Jenkins/AKS DR stack
   hosts: jenkins
   gather_facts: yes
   become: yes
+  vars:
+    argocd_manifest: portfolio-azure.yaml
+    argocd_application_name: portfolio-azure
 
   pre_tasks:
     - name: Verify we can connect
@@ -16,13 +19,14 @@
           {{ ansible_distribution_version }}
 
   roles:
-    - role: common      # System updates, firewall, basic tools
-    - role: docker      # Docker CE installation
-    - role: jenkins     # Jenkins + Java installation
-    - role: kubectl     # kubectl, Helm, Azure CLI
+    - role: common      
+    - role: docker      
+    - role: jenkins     
+    - role: kubectl     
+    - role: argocd      
 
   post_tasks:
-    - name: Verify all services are running
+    - name: Verify services are running
       systemd:
         name: "{{ item }}"
       register: service_status
@@ -34,12 +38,13 @@
     - name: Print final status
       debug:
         msg: |
-          ✓ VM configuration complete
+          ✓ Azure VM configuration complete
           ✓ Jenkins running on port 8080
           ✓ Docker installed
           ✓ kubectl installed
           ✓ Helm installed
           ✓ Azure CLI installed
+          ✓ ArgoCD installed and configured
 
   handlers:
     - name: restart sshd

@@ -1,0 +1,236 @@
+pipeline {
+  agent any
+
+  environment {
+    // Azure Container Registry configuration
+    ACR_NAME         = "acrprodnagham"
+    ACR_LOGIN_SERVER = "acrprodnagham.azurecr.io"
+    IMAGE_NAME       = "portfolio-website"
+    IMAGE_TAG        = "${BUILD_NUMBER}"
+
+    // AKS configuration
+    AKS_CLUSTER        = "aks-prod-cluster"
+    AKS_RESOURCE_GROUP = "rg-prod-westeurope"
+    K8S_NAMESPACE      = "portfolio"
+
+    // Azure service principal credentials stored in Jenkins
+    AZURE_CLIENT_ID     = credentials('azure-client-id')
+    AZURE_CLIENT_SECRET = credentials('azure-client-secret')
+    AZURE_TENANT_ID     = credentials('azure-tenant-id')
+    AZURE_SUBSCRIPTION_ID = credentials('azure-subscription-id')
+  }
+
+  options {
+    buildDiscarder(logRotator(numToKeepStr: '10'))
+    timeout(time: 30, unit: 'MINUTES')
+    disableConcurrentBuilds()
+    timestamps()
+  }
+
+  triggers {
+    githubPush()
+  }
+
+  stages {
+    stage('Checkout') {
+      steps {
+        echo "Checking out code from GitHub"
+        checkout scm
+      }
+    }
+
+    stage('Install Dependencies') {
+      steps {
+        echo "Installing Node.js dependencies"
+        dir('website') {
+          sh '''
+            echo "Node: $(node --version)"
+            echo "NPM:  $(npm --version)"
+            npm ci
+          '''
+        }
+      }
+    }
+
+    stage('Run Tests') {
+      steps {
+        echo "Running tests"
+        dir('website') {
+          sh 'npm test'
+        }
+      }
+      post {
+        failure {
+          echo "Tests failed — pipeline stopped. No broken code deployed."
+        }
+      }
+    }
+
+    stage('Build Docker Image') {
+      steps {
+        echo "Building Docker image"
+        dir('website') {
+          sh '''
+            docker build \
+              --no-cache \
+              --label build-number=${IMAGE_TAG} \
+              --label git-commit=${GIT_COMMIT} \
+              -t ${ACR_LOGIN_SERVER}/${IMAGE_NAME}:${IMAGE_TAG} \
+              -t ${ACR_LOGIN_SERVER}/${IMAGE_NAME}:latest \
+              .
+
+            echo "Built images:"
+            docker images | grep ${IMAGE_NAME}
+          '''
+        }
+      }
+    }
+
+    stage('Security Scan') {
+      steps {
+        echo "Scanning image for vulnerabilities"
+        sh '''
+          if ! command -v trivy &> /dev/null; then
+            curl -sfL \
+              https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
+              | sh -s -- -b /usr/local/bin
+          fi
+
+          trivy image \
+            --exit-code 0 \
+            --severity HIGH,CRITICAL \
+            --no-progress \
+            ${ACR_LOGIN_SERVER}/${IMAGE_NAME}:${IMAGE_TAG}
+        '''
+      }
+    }
+
+    stage('Login to Azure & Push Image') {
+      steps {
+        echo "Logging in to Azure and pushing image to ACR"
+        sh '''
+          az login --service-principal \
+            -u ${AZURE_CLIENT_ID} \
+            -p ${AZURE_CLIENT_SECRET} \
+            --tenant ${AZURE_TENANT_ID}
+
+          az account set --subscription ${AZURE_SUBSCRIPTION_ID}
+          az acr login --name ${ACR_NAME}
+
+          docker push ${ACR_LOGIN_SERVER}/${IMAGE_NAME}:${IMAGE_TAG}
+          docker push ${ACR_LOGIN_SERVER}/${IMAGE_NAME}:latest
+
+          echo "Pushed successfully:"
+          echo "  ${ACR_LOGIN_SERVER}/${IMAGE_NAME}:${IMAGE_TAG}"
+          echo "  ${ACR_LOGIN_SERVER}/${IMAGE_NAME}:latest"
+        '''
+      }
+    }
+
+    stage('Update Azure Kustomization') {
+      steps {
+        echo "Updating Azure kustomization tag"
+        sh '''
+          echo "Before:"
+          grep newTag kubernetes/overlays/azure/kustomization.yaml
+
+          sed -i 's|newTag:.*|newTag: "${IMAGE_TAG}"|g' kubernetes/overlays/azure/kustomization.yaml
+
+          echo "After:"
+          grep newTag kubernetes/overlays/azure/kustomization.yaml
+        '''
+      }
+    }
+
+    stage('Deploy to AKS') {
+      steps {
+        echo "Deploying to AKS cluster ${AKS_CLUSTER}"
+        sh '''
+          az aks get-credentials \
+            --resource-group ${AKS_RESOURCE_GROUP} \
+            --name ${AKS_CLUSTER} \
+            --overwrite-existing
+
+          kubectl cluster-info
+          kubectl get nodes
+          kubectl apply -k kubernetes/overlays/azure/
+
+          kubectl rollout status deployment/portfolio-deployment \
+            --namespace ${K8S_NAMESPACE} \
+            --timeout=120s
+        '''
+      }
+
+      post {
+        failure {
+          sh '''
+            echo "Deployment failed — rolling back to previous version"
+            kubectl rollout undo deployment/portfolio-deployment \
+              --namespace ${K8S_NAMESPACE}
+            kubectl get pods --namespace ${K8S_NAMESPACE}
+          '''
+        }
+      }
+    }
+
+    stage('Verify Deployment') {
+      steps {
+        echo "Verifying deployment"
+        sh '''
+          echo " Pods "
+          kubectl get pods --namespace ${K8S_NAMESPACE} --selector app=portfolio
+
+          echo " Deployment "
+          kubectl get deployment portfolio-deployment --namespace ${K8S_NAMESPACE}
+
+          echo " Service "
+          kubectl get service portfolio-service --namespace ${K8S_NAMESPACE}
+
+          echo " Ingress "
+          kubectl get ingress --namespace ${K8S_NAMESPACE}
+
+          echo " Image running "
+          kubectl describe deployment portfolio-deployment --namespace ${K8S_NAMESPACE} | grep Image:
+        '''
+      }
+    }
+
+    stage('Health Check') {
+      steps {
+        echo "Health check on deployed app"
+        sh '''
+          kubectl port-forward deployment/portfolio-deployment 3000:3000 --namespace ${K8S_NAMESPACE} &
+          PF_PID=$!
+          sleep 5
+
+          RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/health)
+          kill $PF_PID 2>/dev/null || true
+
+          if [ "$RESPONSE" = "200" ]; then
+            echo "Health check PASSED — app responding with 200"
+          else
+            echo "Health check FAILED — response was: $RESPONSE"
+            exit 1
+          fi
+        '''
+      }
+    }
+  }
+
+  post {
+    success {
+      echo "PIPELINE SUCCEEDED"
+    }
+    failure {
+      echo "PIPELINE FAILED"
+    }
+    always {
+      echo "Cleaning up Docker images"
+      sh '''
+        docker rmi ${ACR_LOGIN_SERVER}/${IMAGE_NAME}:${IMAGE_TAG} 2>/dev/null || true
+        docker rmi ${ACR_LOGIN_SERVER}/${IMAGE_NAME}:latest 2>/dev/null || true
+        docker image prune -f 2>/dev/null || true
+      '''
+    }
+  }
+}
