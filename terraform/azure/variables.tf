@@ -37,3 +37,9 @@ variable "vm_size" {
   type        = string
   default     = "Standard_B2s"
 }
+
+variable "eks_alb_dns" {
+  description = "The DNS name of the ALB for EKS"
+  type        = string
+  default     = ""
+}
