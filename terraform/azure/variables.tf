@@ -43,3 +43,9 @@ variable "eks_alb_dns" {
   type        = string
   default     = ""
 }
+
+variable "aks_ingress_ip" {
+  description = "The public IP address of the AKS ingress controller"
+  type        = string
+  default     = ""
+}

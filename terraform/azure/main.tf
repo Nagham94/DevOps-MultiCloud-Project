@@ -58,7 +58,7 @@ resource "azurerm_traffic_manager_profile" "main" {
   tags = var.tags
 }
 
-# Azure AKS endpoint — Priority 1 (primary)
+# AWS EKS endpoint — Priority 1 (primary)
 resource "azurerm_traffic_manager_external_endpoint" "eks" {
   name       = "endpoint-eks-aws"
   profile_id = azurerm_traffic_manager_profile.main.id
@@ -67,11 +67,13 @@ resource "azurerm_traffic_manager_external_endpoint" "eks" {
   weight     = 100
 }
 
-# AWS EKS endpoint — Priority 2 (disaster recovery)
+# Azure AKS endpoint — Priority 2 (disaster recovery)
 resource "azurerm_traffic_manager_azure_endpoint" "aks" {
   name               = "endpoint-aks-azure"
   profile_id         = azurerm_traffic_manager_profile.main.id
-  target_resource_id = azurerm_public_ip.aks_ingress.id
+  target_resource_id = var.aks_ingress_ip
   priority           = 2
   weight             = 100
 }
+
+
